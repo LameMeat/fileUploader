@@ -1,11 +1,14 @@
 "use client";
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import ProgressBar from './ProgressBar';
 
 export default function UploadForm() {
   type PreviewFile = { file: File; url: string };
   const [files, setFiles] = useState<PreviewFile[] | null>(null);
   const [status, setStatus] = useState<string | null>(null);
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const inputId = 'native-file-input';
+  const mountedRef = useRef(true);
 
   function onChange(e: React.ChangeEvent<HTMLInputElement>) {
     const fl = e.target.files;
@@ -29,26 +32,48 @@ export default function UploadForm() {
   // cleanup object URLs when files are cleared
   useEffect(() => {
     return () => {
-      // noop - we revoke on Reset below
+      // revoke any previews on unmount
+      mountedRef.current = false;
+  if (files) files.forEach((p: PreviewFile) => { try { URL.revokeObjectURL(p.url); } catch (e) {} });
     };
   }, []);
 
-  async function onSubmit(e: React.FormEvent) {
+  function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!files || files.length === 0) return;
+
     const fd = new FormData();
-    for (let i = 0; i < files.length; i++) {
-      // append the actual File object (not the wrapper) and include filename
-      fd.append('files', files[i].file, files[i].file.name);
-    }
+    for (let i = 0; i < files.length; i++) fd.append('files', files[i].file, files[i].file.name);
+
     setStatus('Uploading...');
-    try {
-      const res = await fetch('/api/upload', { method: 'POST', body: fd });
-      if (!res.ok) throw new Error(await res.text());
-      setStatus('Upload successful');
-    } catch (err: any) {
-      setStatus('Upload failed: ' + (err.message || String(err)));
-    }
+    setUploadProgress(0);
+
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', '/api/upload');
+
+    xhr.upload.onprogress = (ev) => {
+      if (!ev.lengthComputable) return;
+      const pct = Math.round((ev.loaded / ev.total) * 100);
+      setUploadProgress(pct);
+    };
+
+    xhr.onload = () => {
+      if (!mountedRef.current) return;
+      if (xhr.status >= 200 && xhr.status < 300) {
+        setStatus('Upload successful');
+      } else {
+        setStatus('Upload failed: ' + xhr.statusText);
+      }
+      setUploadProgress(null);
+    };
+
+    xhr.onerror = () => {
+      if (!mountedRef.current) return;
+      setStatus('Upload failed: network error');
+      setUploadProgress(null);
+    };
+
+    xhr.send(fd);
   }
 
   const fileCount = files ? files.length : 0;
@@ -100,6 +125,7 @@ export default function UploadForm() {
           Reset
         </button>
       </div>
+      <ProgressBar progress={uploadProgress} />
       {status && <p className="status">{status}</p>}
     </form>
   );
