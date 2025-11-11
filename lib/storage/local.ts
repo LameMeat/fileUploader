@@ -11,7 +11,7 @@ export class LocalStorageAdapter implements StorageAdapter {
     if (!fs.existsSync(this.uploadsDir)) fs.mkdirSync(this.uploadsDir, { recursive: true });
   }
 
-  async save({ filename, buffer }: { filename: string; buffer: Buffer }): Promise<SaveResult> {
+  async save({ filename, buffer, mimeType }: { filename: string; buffer: Buffer; mimeType?: string }): Promise<SaveResult> {
     const safeName = `${Date.now()}-${filename}`.replace(/[^a-zA-Z0-9._-]/g, '_');
     const outPath = path.join(this.uploadsDir, safeName);
     await fs.promises.writeFile(outPath, buffer);

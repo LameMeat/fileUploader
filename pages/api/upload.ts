@@ -17,9 +17,10 @@ const storage = new LocalStorageAdapter({ uploadsDir });
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') return res.status(405).end('Method Not Allowed');
 
-  const form = new formidable.IncomingForm({ multiples: true });
+  // In formidable v3 the API is a factory: formidable(opts)
+  const form = formidable({ multiples: true });
 
-  form.parse(req, async (err, fields, files) => {
+  form.parse(req, async (err: any, fields: any, files: any) => {
     if (err) {
       console.error('form.parse error', err);
       return res.status(500).send('Failed to parse form');
@@ -27,12 +28,29 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     try {
       const uploadedFiles: any[] = [];
-      const fileEntries = Array.isArray(files.files) ? files.files : [files.files];
+
+      // Files shape can differ by formidable version and form field names.
+      let fileEntries: any[] = [];
+      if (!files) fileEntries = [];
+      else if (Array.isArray(files.files)) fileEntries = files.files;
+      else if (files.files) fileEntries = [files.files];
+      else {
+        // gather and flatten all file values
+        const vals = Object.values(files || {});
+        fileEntries = vals.flat();
+      }
+
       for (const f of fileEntries) {
         if (!f) continue;
-        const buffer = fs.readFileSync(f.path);
-        const out = await storage.save({ filename: f.name, buffer, mimeType: f.type });
+        // support both v2 and v3 shapes
+        const filePath = f.filepath || f.filePath || f.path;
+        const originalName = f.originalFilename || f.originalname || f.name || 'file';
+        const mime = f.mimetype || f.mimeType || f.type || undefined;
+        const buffer = fs.readFileSync(filePath);
+        const out = await storage.save({ filename: originalName, buffer, mimeType: mime });
         uploadedFiles.push(out);
+        // remove temporary file if present
+        try { await fs.promises.unlink(filePath); } catch (e) {}
       }
 
       res.status(200).json({ uploaded: uploadedFiles });
